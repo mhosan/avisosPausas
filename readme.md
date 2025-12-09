@@ -348,6 +348,10 @@ El servicio y la interfaz se comunican a través de archivos JSON:
 ```bash
 python despertador.py --service
 ```
+- Iniciar la interfaz gráfica:
+```bash
+python despertador.py
+```
 
 - Detener el servicio:
 ```bash
