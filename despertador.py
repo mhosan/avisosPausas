@@ -420,24 +420,39 @@ class VentanaDespertador(QMainWindow):
                  QMessageBox.critical(self, 'Error', 'No se pudo leer el estado actual')
 
     def iniciar_servicio(self):
-        """Inicia el servicio en un subproceso"""
+        """Inicia el servicio en un subproceso usando la ruta absoluta del ejecutable y registra errores en el log"""
         try:
             # Primero reseteamos el estado en disco para evitar que se auto-detenga
             estado = leer_estado() or {}
             estado['corriendo'] = True
             with open(STATUS_FILE, 'w') as f:
                 json.dump(estado, f)
-            
-            # Lanzar proceso
-            subprocess.Popen([sys.executable, sys.argv[0], '--service'], 
-                             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
-            
+
+            # Usar ruta absoluta del ejecutable
+            exe_path = os.path.abspath(sys.argv[0])
+            args = [exe_path, '--service']
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+
+            try:
+                proc = subprocess.Popen(args, creationflags=creationflags)
+            except Exception as e:
+                # Registrar en log si falla el lanzamiento
+                try:
+                    with open(LOG_FILE, 'a', encoding='utf-8') as flog:
+                        flog.write(f"[ERROR] No se pudo lanzar el servicio desde GUI: {str(e)}\n")
+                except:
+                    pass
+                QMessageBox.critical(self, 'Error', f'No se pudo iniciar el servicio: {str(e)}')
+                return
+
             QMessageBox.information(self, 'Éxito', 'Servicio iniciado correctamente')
-            
-            # Actualizar UI inmediatamente
             self.actualizar_datos()
-            
         except Exception as e:
+            try:
+                with open(LOG_FILE, 'a', encoding='utf-8') as flog:
+                    flog.write(f"[ERROR] No se pudo iniciar el servicio (bloque externo): {str(e)}\n")
+            except:
+                pass
             QMessageBox.critical(self, 'Error', f'No se pudo iniciar el servicio: {str(e)}')
 
 def main():
