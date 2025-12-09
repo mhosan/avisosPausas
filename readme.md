@@ -342,6 +342,26 @@ El servicio y la interfaz se comunican a través de archivos JSON:
 - **status.json**: El servicio escribe aquí su estado actual
 - **app.log**: Ambos modos leen/escriben en este archivo
 
+## Notas
+
+- Iniciar el servicio a partir del archivo .exe:
+```bash
+python despertador.py --service
+```
+
+- Detener el servicio:
+```bash
+taskkill /F /IM despertador.exe
+```
+/F: Fuerza el cierre.
+/IM: Indica que vas a usar el "Image Name" (nombre del archivo).
+
+- Verificar el estado del servicio:
+```bash
+tasklist | findstr "despertador"
+```
+Si no sale nada, es que está detenido. Si aparece una línea con números, es que sigue activo.
+
 ## Contribuciones y mejoras
 
 Para sugerir mejoras o reportar bugs, contacta al desarrollador.
