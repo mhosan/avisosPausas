@@ -366,6 +366,11 @@ tasklist | findstr "despertador"
 ```
 Si no sale nada, es que está detenido. Si aparece una línea con números, es que sigue activo.
 
+- ubicación de archivos:
+C:\Users\Usuario\AppData\Roaming\despertador\config.json
+
+
+
 ## Contribuciones y mejoras
 
 Para sugerir mejoras o reportar bugs, contacta al desarrollador.

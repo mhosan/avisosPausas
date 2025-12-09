@@ -3,10 +3,11 @@ import os
 import json
 import time
 import threading
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QPushButton, QTextEdit, QMessageBox)
+                             QHBoxLayout, QLabel, QPushButton, QTextEdit, QMessageBox, QSpinBox)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont, QColor
 from windows_toasts import WindowsToaster, Toast
@@ -15,6 +16,7 @@ from windows_toasts import WindowsToaster, Toast
 APP_DATA_DIR = Path(os.getenv('APPDATA')) / 'despertador'
 LOG_FILE = APP_DATA_DIR / 'app.log'
 STATUS_FILE = APP_DATA_DIR / 'status.json'
+CONFIG_FILE = APP_DATA_DIR / 'config.json'
 
 # Crear directorio si no existe
 APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -24,6 +26,8 @@ class ServicioApp:
         self.corriendo = True
         self.ultimo_aviso = None
         self.contador_avisos = 0
+        # Inicializar estado en archivo
+        self.guardar_estado()
         
     def registrar_log(self, mensaje):
         """Escribe en el archivo de log"""
@@ -38,6 +42,17 @@ class ServicioApp:
     
     def guardar_estado(self):
         """Guarda estado actual en JSON para que la GUI lo pueda leer"""
+        # Verificar si hay señal de detención externa antes de escribir
+        try:
+            if STATUS_FILE.exists():
+                with open(STATUS_FILE, 'r') as f:
+                    estado_disco = json.load(f)
+                    # Si en disco dice False, adoptamos ese estado
+                    if not estado_disco.get('corriendo', True):
+                        self.corriendo = False
+        except Exception:
+            pass
+
         estado = {
             'corriendo': self.corriendo,
             'ultimo_aviso': self.ultimo_aviso,
@@ -71,13 +86,24 @@ class ServicioApp:
         
         while self.corriendo:
             try:
-                # Emitir aviso cada 30 minutos (1800 segundos)
-                # Para pruebas, usa 30 segundos: time.sleep(30)
-                time.sleep(30)
+                # Leer configuración
+                config = leer_config()
+                intervalo = config.get('intervalo', 30)
+                
+                # Emitir aviso según configuración
+                time.sleep(intervalo)
                 self.emitir_aviso()
+                
+                # Verificar si se solicitó detención desde GUI
+                estado = leer_estado()
+                if estado and not estado.get('corriendo', True):
+                    self.registrar_log("Detención solicitada desde GUI")
+                    self.corriendo = False
+                    
             except Exception as e:
                 self.registrar_log(f"ERROR en loop: {str(e)}")
                 time.sleep(5)
+
 
 def leer_logs(ultimas_lineas=30):
     """Lee las últimas N líneas del archivo de log"""
@@ -90,6 +116,26 @@ def leer_logs(ultimas_lineas=30):
         return ''.join(lineas[-ultimas_lineas:])
     except:
         return "Error al leer logs"
+
+def leer_config():
+    """Lee la configuración desde el archivo JSON"""
+    if not CONFIG_FILE.exists():
+        return {'intervalo': 30}
+    
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    except:
+        return {'intervalo': 30}
+
+def guardar_config_file(intervalo):
+    """Guarda la configuración en el archivo JSON"""
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump({'intervalo': intervalo}, f)
+        return True
+    except:
+        return False
 
 def leer_estado():
     """Lee el estado actual desde el archivo JSON"""
@@ -115,6 +161,9 @@ class VentanaDespertador(QMainWindow):
         
         # Actualizar inmediatamente
         self.actualizar_datos()
+        
+        # Cargar configuración inicial
+        self.cargar_configuracion()
     
     def init_ui(self):
         """Inicializa la interfaz gráfica"""
@@ -205,6 +254,39 @@ class VentanaDespertador(QMainWindow):
         separador = QLabel('─' * 100)
         separador.setStyleSheet("color: #333333;")
         main_layout.addWidget(separador)
+
+        # Configuración
+        config_layout = QHBoxLayout()
+        
+        label_config = QLabel('Intervalo (segundos):')
+        label_config.setFont(QFont('Arial', 10))
+        label_config.setStyleSheet("color: #ffffff;") 
+        config_layout.addWidget(label_config)
+        
+        self.spin_intervalo = QSpinBox()
+        self.spin_intervalo.setRange(5, 86400) # 5s to 24h
+        self.spin_intervalo.setValue(30)
+        self.spin_intervalo.setStyleSheet("""
+            QSpinBox {
+                background-color: #333333;
+                color: #ffffff;
+                padding: 4px;
+                border: 1px solid #555555;
+            }
+        """)
+        config_layout.addWidget(self.spin_intervalo)
+        
+        btn_guardar_config = QPushButton('Guardar Intervalo')
+        btn_guardar_config.clicked.connect(self.guardar_configuracion)
+        config_layout.addWidget(btn_guardar_config)
+        
+        config_layout.addStretch()
+        main_layout.addLayout(config_layout)
+        
+        # Separador 2
+        separador2 = QLabel('─' * 100)
+        separador2.setStyleSheet("color: #333333;")
+        main_layout.addWidget(separador2)
         
         # Título logs
         titulo_logs = QLabel('Logs (últimas 30 líneas)')
@@ -228,7 +310,17 @@ class VentanaDespertador(QMainWindow):
         btn_limpiar.clicked.connect(self.limpiar_logs)
         botones_layout.addWidget(btn_limpiar)
         
-        btn_salir = QPushButton('Salir')
+        self.btn_iniciar = QPushButton('Iniciar Servicio')
+        self.btn_iniciar.setStyleSheet("background-color: #107c10;") # Verde
+        self.btn_iniciar.clicked.connect(self.iniciar_servicio)
+        botones_layout.addWidget(self.btn_iniciar)
+        
+        self.btn_detener = QPushButton('Detener Servicio')
+        self.btn_detener.setStyleSheet("background-color: #d13438;") # Rojo
+        self.btn_detener.clicked.connect(self.detener_servicio)
+        botones_layout.addWidget(self.btn_detener)
+        
+        btn_salir = QPushButton('Salir GUI')
         btn_salir.clicked.connect(self.close)
         botones_layout.addWidget(btn_salir)
         
@@ -239,8 +331,24 @@ class VentanaDespertador(QMainWindow):
         """Actualiza los datos mostrados en la ventana"""
         estado = leer_estado()
         if estado:
+            esta_corriendo = estado.get('corriendo', False)
             self.label_contador.setText(str(estado['contador_avisos']))
             self.label_ultimo.setText(estado['ultimo_aviso'] or '---')
+            
+            if esta_corriendo:
+                self.label_estado.setText('Ejecutándose')
+                self.label_estado.setStyleSheet("color: #00ff00;")
+                self.btn_iniciar.setEnabled(False)
+                self.btn_detener.setEnabled(True)
+                self.btn_iniciar.setStyleSheet("background-color: #333333; color: #888888;")
+                self.btn_detener.setStyleSheet("background-color: #d13438;")
+            else:
+                self.label_estado.setText('Detenido')
+                self.label_estado.setStyleSheet("color: #ff0000;")
+                self.btn_iniciar.setEnabled(True)
+                self.btn_detener.setEnabled(False)
+                self.btn_iniciar.setStyleSheet("background-color: #107c10;")
+                self.btn_detener.setStyleSheet("background-color: #333333; color: #888888;")
         
         # Actualizar logs
         logs = leer_logs(30)
@@ -268,6 +376,69 @@ class VentanaDespertador(QMainWindow):
                 QMessageBox.information(self, 'Éxito', 'Logs limpios correctamente')
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Error al limpiar logs: {str(e)}')
+
+    def cargar_configuracion(self):
+        """Carga la configuración en la interfaz"""
+        config = leer_config()
+        if config and 'intervalo' in config:
+            self.spin_intervalo.setValue(config['intervalo'])
+
+    def guardar_configuracion(self):
+        """Guarda la configuración desde la interfaz"""
+        intervalo = self.spin_intervalo.value()
+        if guardar_config_file(intervalo):
+            QMessageBox.information(self, 'Éxito', f'Intervalo actualizado a {intervalo} segundos.\nEl servicio usará este valor en el próximo ciclo.')
+            # Nota: No podemos usar self.app.registrar_log aquí directamente si app es solo una instancia separada,
+            # pero dado que el paso Main pasa una instancia de ServicioApp, podemos usarla si comparten FS, lo cual hacen.
+            self.app.registrar_log(f"Configuración actualizada desde GUI: Intervalo = {intervalo}s")
+        else:
+            QMessageBox.critical(self, 'Error', 'No se pudo guardar la configuración')
+
+    def detener_servicio(self):
+        """Envía señal para detener el servicio"""
+        reply = QMessageBox.question(
+            self,
+            'Confirmar',
+            '¿Está seguro de que desea detener el servicio en segundo plano?\nEsto hará que dejen de llegar los avisos.',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            estado = leer_estado()
+            if estado:
+                estado['corriendo'] = False
+                try:
+                    with open(STATUS_FILE, 'w') as f:
+                        json.dump(estado, f)
+                    QMessageBox.information(self, 'Éxito', 'Se ha enviado la señal de detención.\nEl servicio se detendrá en el próximo ciclo.')
+                    self.label_estado.setText('Deteniéndose...')
+                    self.label_estado.setStyleSheet("color: #ffa500;")
+                except Exception as e:
+                    QMessageBox.critical(self, 'Error', f'No se pudo actualizar el estado: {str(e)}')
+            else:
+                 QMessageBox.critical(self, 'Error', 'No se pudo leer el estado actual')
+
+    def iniciar_servicio(self):
+        """Inicia el servicio en un subproceso"""
+        try:
+            # Primero reseteamos el estado en disco para evitar que se auto-detenga
+            estado = leer_estado() or {}
+            estado['corriendo'] = True
+            with open(STATUS_FILE, 'w') as f:
+                json.dump(estado, f)
+            
+            # Lanzar proceso
+            subprocess.Popen([sys.executable, sys.argv[0], '--service'], 
+                             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+            
+            QMessageBox.information(self, 'Éxito', 'Servicio iniciado correctamente')
+            
+            # Actualizar UI inmediatamente
+            self.actualizar_datos()
+            
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'No se pudo iniciar el servicio: {str(e)}')
 
 def main():
     if len(sys.argv) > 1:
